@@ -1,0 +1,42 @@
+ r←Demo;A1;A2;M1
+⍝ Demo WebSockets
+
+ WSPORT←7777                      ⍝ Port to use
+ iConga←#.Conga.Init''            ⍝ Initialise Conga
+ :Trap 0 ⋄ SOCKP.Close ⋄ :EndTrap ⍝ In case of unclean shutdown
+ DemoService.Init                 ⍝ Initialise our service
+
+⍝ Start the "SockPuppet", passing a reference to the service and the names of the channels
+ SOCKP←⎕NEW SockPuppet(WSPORT DemoService('Prices' 'Transactions'))
+
+⍝ Create 3 web socket clients
+⍝    These would normally be in separate APL processes
+⍝    or created from a browser using JavaScript "ws = new WebSocket(address,protocol)"
+⍝            followed by  ws.send(AuthMsg) (see CreateWSClient for the expected content)
+
+ ⎕←'*** Starting Price monitor for Alexey ***'
+ A1←CreateWSClient('Alexey' 'volvo')'Prices'('RUB')
+ ⎕←'*** Starting Transaction monitor for Alexey ***'
+ A2←CreateWSClient('Alexey' 'volvo')'Transactions'('ABC' 'XYZ')
+ ⎕←'*** Starting Price monitor for Morten ***'
+ M1←CreateWSClient('Morten' 'hyundai')'Prices'('RUB' 'USD')
+
+⍝ Now generate some activity and notice that the relevant clients are automatically notified
+
+ ⎕←'*** Update price of USD ***'
+ DemoService.NewPrice'USD' 123.45
+
+ ⎕←'*** Buy some XYZ ***'
+ DemoService.NewTransaction'XYZ' 'Buy' 500
+
+ ⎕←'*** Update price of RUB ***'
+ DemoService.NewPrice'RUB' 543.21
+
+ ⎕←'*** Sell some XYZ ***'
+ DemoService.NewTransaction'XYZ' 'Sell' 500
+
+ (A1 A2 M1).stop←1
+ ⎕DL 1
+ SOCKP.Close
+ ⎕DL 1
+ ⎕EX'SOCKP'

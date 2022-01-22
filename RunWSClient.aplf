@@ -1,0 +1,14 @@
+ RunWSClient(drc ns);rc;obj;event;data;res;z
+⍝ Monitor a WebSocket client.
+
+ :If 0=⎕NC 'ns.stop' ⋄ ns.stop←0 ⋄ :EndIf
+ :Repeat
+     (rc obj event data)←4↑res←drc.Wait ns.cid 1000
+     :Select event
+     :Case 'WSReceive'
+         ns.state←⎕JSON⊃data
+         Process ns
+     :EndSelect
+ :Until ns.stop
+
+ z←{0::⍬ ⋄ drc.Close ⍵}ns.cid

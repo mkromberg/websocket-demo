@@ -1,0 +1,51 @@
+:Namespace DemoService
+
+⍝ Demo Web Service for use with SockPuppet
+
+    ∇ Init
+      users←'Alexey' 'Morten'
+      passwords←'volvo' 'hyundai'
+      userids←1 2
+     
+      CurrencyRates←'USD' 'RUB',⍪0.01×?2⍴10000 ⍝ Symbol Price
+      TransactionData←0 3⍴0                    ⍝ Symbol Action Quantity
+    ∇
+     
+
+⍝ There must be an Authenticate message which returns a user ID or ¯1 if authentication fails   
+    ∇ r←Authenticate token;i;name;pwd
+      (name pwd)←token
+      :If (≢users)≥i←users⍳⊂name
+      :AndIf pwd≡i⊃passwords
+          r←i⊃userids
+      :Else
+          r←¯1
+      :EndIf
+    ∇
+
+
+⍝ There must be a channel function for each supported channel (Prices and Transactions)
+    ∇ r←userid Prices data;ns;currencies
+    ⍝ Websocket subscription     
+      r←↓(CurrencyRates[;1]∊,⊆data.filter)⌿CurrencyRates
+    ∇
+
+    ∇ r←userid Transactions data;ns
+    ⍝ Websocket subscription
+      r←↓(TransactionData[;1]∊,⊆data.filter)⌿TransactionData
+    ∇
+  
+  ⍝ The rest is application-specific
+
+    ∇ r←NewPrice(sym price)
+      CurrencyRates[CurrencyRates[;1]⍳⊂sym;2]←price
+      #.SOCKP.Publish'Prices' ¯1 ⍝ ¯1 means broadcast to all
+    ∇
+
+    ∇ r←NewTransaction(sym action quantity)
+      TransactionData⍪←sym action quantity
+      #.SOCKP.Publish'Transactions' ¯1
+    ∇
+
+
+:EndNamespace

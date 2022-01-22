@@ -1,0 +1,8 @@
+Process ns;z;NL
+⍝ This function handles notification events on the client side
+⍝    In the demo we just dump the message to teh session
+
+NL←⎕UCS 13
+z←'Thread #',(⍕ns.tid),'/',ns.user,' received data:',NL
+z,←(⎕JSON⍠'Compact' 0) ns.state
+⎕←z,NL

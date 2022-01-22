@@ -1,0 +1,18 @@
+ws_state←CreateWSClient (user channel filter);res;wsclt;wstid;authmsg;authns
+ ⍝ Create a websocket connection, and return state namespace
+
+ ws_state←⎕NS ''
+ ws_state.⎕DF '[WS client for ',(⊃user),' ',channel,']'
+
+ assert 0=⊃res←iConga.Clt '' 'localhost'WSPORT'http' 10000('Options' 1)
+ wsclt←2⊃res
+ ws_state.cid←wsclt
+ assert 0=⊃res←iConga.SetProp wsclt'WSUpgrade'('' 'localhost' '') ⍝ user should be token
+ assert 0 wsclt'WSUpgrade'≡3↑res←iConga.Wait wsclt 1000
+ ws_state.tid←RunWSClient&iConga ws_state   ⍝ Run thread to monitor the socket in a new thread
+ ⎕←'Thread ',(⍕ws_state.tid),' started for user ',(⊃user),' to monitor ',channel,' with filter ',filter
+ ws_state.(user channel filter)←(⊃user) channel filter
+ authmsg←⎕JSON authns⊣(authns←⎕NS'').(user channel filter)←user channel filter
+ assert 0=⊃res←iConga.Send wsclt(authmsg 1)
+ ⎕DL 1
+ assert 0≠⎕NC'ws_state.state'

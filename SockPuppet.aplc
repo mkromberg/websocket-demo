@@ -1,0 +1,145 @@
+:Class SockPuppet
+    ⍝ Ultra simple publish/subscribe server
+    ⍝ isp←⎕NEW SockPuppet (port handler channels)
+    ⍝                               \         \ list of supported channel names
+    ⍝                                \ namespace containing fns "Login" corresponding to each named channel
+    ⍝ e.g. isp←⎕NEW SockPuppet (8081 #.server 'GameState')
+
+    (⎕IO ⎕ML)←0 1
+
+    auto←1          ⍝ Automatic WSUpgrade
+    maxsize←10000   ⍝ max size of WS message
+
+    :Field Public Shared authtime←60000  ⍝ 60 seconds to authorise websocket
+    :Field Public users←⍬    ⍝ User info (one per connected user)
+    :Field Public socks←⍬    ⍝ Open sockets            (per user)
+    :Field Public subs←⍬     ⍝ Channels subscribed to  (per user)
+    :Field Public ips←⍬      ⍝ IP Addresses            (per user)
+    :Field Public source←⍬   ⍝ Ref to namespace containing Login and Channel functions
+    :Field Public channels←⍬ ⍝ Names of valid channels (must be functions in source)
+    :Field Public TID←¯1     ⍝ TID that server is running in
+    :Field Public iConga
+
+    ∇ Make(port src chan);ret;fns;m;z;res
+      :Access Public
+      :Implements Constructor
+     
+     ⍝ Publish/subscribe via web sockets
+     
+      iConga←#.Conga.Init''  ⍝ Default Conga instance
+      z←iConga.SetProp'.' 'EventMode' 1 ⍝ TimeOut and Close as events
+      DONE←0 ⍝ Set global DONE to 1 to stop service
+     
+      :If ~∧/m←3=⌊src.⎕NC fns←(⊂'Authenticate'),⊆chan
+          ('Function(s) not found in ',(⍕src),': ',⍕(~m)/fns)⎕SIGNAL 6
+      :EndIf
+     
+      :If 0≠⊃(ret srv)←res←2↑iConga.Srv'' ''port'http'maxsize('Options'auto)
+          ('Unable to create listener: ',⍕res)⎕SIGNAL 2
+      :EndIf
+     
+      source←src
+      channels←⊆chan
+      TID←Run&srv ⍝ Run&Srv to run in new thread
+      ⎕←'SockPuppet server ',srv,' listening on port ',(⍕port),' in thread ',⍕TID
+    ∇
+
+    ∇ UnMake;z
+      :Implements Destructor
+      :Trap 0
+          z←iConga.Close srv
+      :EndTrap
+    ∇
+
+    ∇ Close;z
+      :Access Public
+      DONE←1 ⋄ ⎕DL 1
+      z←iConga.Close srv
+    ∇
+
+    ∇ {Z}←Publish(channel addrs);user;sock;resp;z;res;s;d;m;sub;token
+      :Access Public
+      Z←0 0⍴⍬
+      :If addrs≡¯1 ⋄ addrs←users ⋄ :EndIf
+      →0⌿⍨0=≢subs
+      addrs←((m/subs.channel)∊⊂channel)/(m←users∊addrs)/users
+      :For user :In addrs∩users
+          token←user ⍝ could be some kind of session id
+          sock sub←socks subs⌿¨⍨⊂(user=users)∧subs.channel∊⊂channel
+          :For s d :InEach sock sub
+              resp←⎕JSON token(source⍎channel)d
+         ⍝ ⎕←'SockPuppet send' channel user resp
+              :If 0≠⊃res←iConga.Send s(resp 1)
+              ⍝ ⎕←'    (failed: ',(⍕res),')'
+                  res←iConga.Close s
+                  RemoveSock s
+              :EndIf
+          :EndFor
+      :EndFor
+    ∇
+
+    ∇ Run srv;rc;obj;event;data;wait;userid;z;token;chan;ip;m;unauth
+      unauth←0 2⍴0
+      :While ~DONE
+          (rc obj event data)←4↑wait←iConga.Wait srv 1000 ⍝ Time out now and again
+          :Select rc
+          :Case 0
+              ⍝ :If event≢'Timeout' ⋄ ∘∘∘ ⋄ :EndIf
+              :Select event
+              :Case 'WSReceive'
+                  unauth←(~unauth[;0]∊⊂obj)⌿unauth ⍝ Whatever happens it won't be on the list after this
+                  :Trap 999
+                      data←⎕JSON⊃data
+                      :If ¯1≠userid←source.Authenticate data.user
+                          ip←1⊃iConga.GetProp obj'PeerAddr'
+                          users socks subs ips,∘⊂←userid obj data ip
+                          z←iConga.Send obj('{"rc":0, "msg": "AUTH OK"}' 1)
+                          {Publish ⍵⊣⎕DL 0.1}&data.channel userid
+                      :Else
+                          z←iConga.Close obj
+                      :EndIf
+                  :Else
+                      z←iConga.Close obj
+                  :EndTrap
+              :Case 'WSUpgrade'
+                  unauth⍪←obj(2⊃⎕AI)
+              :CaseList 'Closed' 'Error'
+                  ⍝ ⎕←'*** Closed: ',obj,' (',(⍕(users,¯1)[socks⍳⊂obj]),')'
+                  RemoveSock obj
+              :Case 'Timeout'
+                  :If 0≠≢unauth
+                  :AndIf ∨/m←unauth[;1]<(2⊃⎕AI)-authtime
+                      z←m/unauth[;0]
+                      ⍝ ⎕←'*** Closing unauthorised websocket(s): ',⍕z
+                      z←iConga.Close¨z
+                      unauth←(~m)⌿unauth
+                  :EndIf
+              :Case 'Connect'
+                  ⍝ Could do something on connection, but currently wait for WSUpgrade
+              :Else
+                  ⎕←'*** Unexpected event: ',⍕wait
+                  ⎕←'    Closing ',obj
+                  RemoveSock obj
+              :EndSelect
+          :Case 100
+              ⎕←'*** 100 TIMEOUT received in event mode - ignored ***'
+              ⎕←'EventMode: ',(1↓iConga.GetProp'.' 'EventMode')
+              z←iConga.SetProp'.' 'EventMode' 1 ⍝ Reset if overwritten
+              ⍝ We could also do some housekeeping here, although it should never happen
+          :Else
+              ⎕←'Error in Wait: ',⍕wait ⋄ DONE←1
+          :EndSelect
+      :EndWhile
+      ⎕←'SockPuppet shutting down'
+      :Trap 0
+          z←iConga.Close srv
+      :EndTrap
+    ∇
+
+    ∇ RemoveSock sock;z
+      :Access Public
+      (users socks subs ips)←(~socks∊⊆sock)∘/¨users socks subs ips
+      z←iConga.Close sock
+    ∇
+
+:EndClass
